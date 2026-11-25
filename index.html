@@ -88,6 +88,13 @@ tr:hover td{background:var(--bg3);color:var(--text)}
 td.acct-name{color:var(--blue);font-weight:500;max-width:200px}
 td.amount{font-weight:600;color:var(--teal);white-space:nowrap}
 td.use-case{max-width:400px;line-height:1.4;font-size:11px}
+td.notes-cell{min-width:150px;max-width:250px;font-size:11px;color:var(--text);padding:4px 6px;border:1px dashed transparent;transition:border-color .2s}
+td.notes-cell.editable{cursor:text}
+td.notes-cell.editable:hover{border-color:var(--text3)}
+td.notes-cell.editable:focus{outline:none;border-color:var(--accent);background:rgba(255,255,255,0.05)}
+.edit-lock-btn{background:none;border:1px solid var(--text3);color:var(--text3);border-radius:6px;padding:2px 10px;font-size:11px;cursor:pointer;transition:all .2s}
+.edit-lock-btn:hover{border-color:var(--accent);color:var(--accent)}
+.edit-lock-btn.unlocked{border-color:#4ade80;color:#4ade80}
 td.qtr-cell{text-align:center;font-weight:600}
 
 /* Badges */
@@ -132,7 +139,8 @@ td.qtr-cell{text-align:center;font-weight:600}
 <!-- Tabs -->
 <div class="tabs" id="main-tabs">
   <button class="tab active" data-tab="summary">Pipeline Summary</button>
-  <button class="btn-reset" onclick="resetAllChartFilters()" style="margin-left:auto;align-self:center;margin-right:12px">Reset All</button>
+  <button class="btn-reset" onclick="resetAllChartFilters()" style="margin-left:auto;align-self:center">Reset All</button>
+  <button class="edit-lock-btn" id="edit-lock-btn" onclick="toggleEditLock()" style="align-self:center;margin-right:12px">Unlock Notes</button>
 </div>
 
 <!-- Tab: Summary -->
@@ -167,6 +175,34 @@ let filtered = [...DATA];
 let activeTab = 'summary';
 
 // Helpers
+const APPS_SCRIPT_URL='https://script.google.com/a/macros/salesforce.com/s/AKfycbxPEwFsCm6YRqLtg8-ADsm1p_jK8R57WWdXnVQohycazwYCV2Y9pV2OJ7A1W7-X2Xa77w/exec'; // Paste your deployed Apps Script web app URL here
+let notesCache={};
+let notesUnlocked=false;
+let editToken='';
+function getNote(id){return notesCache[id]||'';}
+function saveNote(id,text){
+  notesCache[id]=text;
+  try{localStorage.setItem('dashNotes',JSON.stringify(notesCache));}catch(e){}
+  if(!APPS_SCRIPT_URL||!editToken)return;
+  fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({id:id,note:text,token:editToken}),redirect:'follow'}).catch(()=>{});
+}
+function loadNotesFromSheet(){
+  if(!APPS_SCRIPT_URL){try{notesCache=JSON.parse(localStorage.getItem('dashNotes')||'{}');}catch(e){}return Promise.resolve();}
+  return fetch(APPS_SCRIPT_URL,{redirect:'follow'}).then(r=>r.json()).then(data=>{notesCache=data;localStorage.setItem('dashNotes',JSON.stringify(data));}).catch(()=>{try{notesCache=JSON.parse(localStorage.getItem('dashNotes')||'{}');}catch(e){}});
+}
+function toggleEditLock(){
+  const btn=document.getElementById('edit-lock-btn');
+  if(notesUnlocked){notesUnlocked=false;editToken='';btn.textContent='Unlock Notes';btn.classList.remove('unlocked');applyNotesLock();return;}
+  const pw=prompt('Enter passphrase to unlock notes editing:');
+  if(!pw)return;
+  editToken=pw;notesUnlocked=true;btn.textContent='Lock Notes';btn.classList.add('unlocked');applyNotesLock();
+}
+function applyNotesLock(){
+  document.querySelectorAll('.notes-cell').forEach(cell=>{
+    if(notesUnlocked){cell.contentEditable='true';cell.classList.add('editable');}
+    else{cell.contentEditable='false';cell.classList.remove('editable');}
+  });
+}
 function fmt(n){
   if(n>=1e6) return '$'+(n/1e6).toFixed(1)+'M';
   if(n>=1e3) return '$'+(n/1e3).toFixed(0)+'K';
@@ -195,9 +231,11 @@ function init(){
   ALL_QUARTERS.push(...WANTED_QTRS.filter(q=>qtrs.has(q)));
   filtered=[...DATA];
   buildQuarterTabs();
-  render();
-  const defTab=document.querySelector('[data-tab="qtr-FY2027-Q4"]');
-  if(defTab) defTab.click();
+  loadNotesFromSheet().then(()=>{
+    render();
+    const defTab=document.querySelector('[data-tab="qtr-FY2027-Q4"]');
+    if(defTab) defTab.click();
+  });
 }
 function resetAllChartFilters(){
   summaryChartFilter={field:null,value:null};
@@ -428,8 +466,9 @@ function renderQuarterTab(qtr){
   ]);
   document.getElementById('qtr-'+qtr+'-narr-info').textContent='USA Top 50 of '+usForQtr.length+' US opportunities in '+qtr;
   document.getElementById('qtr-'+qtr+'-narr-table').innerHTML='<table><thead><tr><th>#</th><th>Account Name</th><th>Use Case Summary</th><th>Forecast</th><th>Stage</th><th>First Line Manager</th><th>Amount</th><th>Notes/Remarks</th></tr></thead><tbody>'+
-    top50.map((r,i)=>'<tr><td>'+(i+1)+'</td><td class="acct-name">'+r.acct+'<br><span style="font-size:10px;color:var(--text3)">'+r.own+'</span></td><td class="use-case">'+(r.uc||'<span style="color:var(--text3)">—</span>')+'</td><td>'+fcBadge(r.fc)+'</td><td><span class="badge badge-stage">'+stgShort(r.stg)+'</span></td><td>'+r.mgr+'</td><td class="amount">'+fmtFull(r.amt)+'</td><td></td></tr>').join('')+
+    top50.map((r,i)=>'<tr><td>'+(i+1)+'</td><td class="acct-name">'+r.acct+'<br><span style="font-size:10px;color:var(--text3)">'+r.own+'</span></td><td class="use-case">'+(r.uc||'<span style="color:var(--text3)">—</span>')+'</td><td>'+fcBadge(r.fc)+'</td><td><span class="badge badge-stage">'+stgShort(r.stg)+'</span></td><td>'+r.mgr+'</td><td class="amount">'+fmtFull(r.amt)+'</td><td class="notes-cell'+(notesUnlocked?' editable':'')+'" contenteditable="'+(notesUnlocked?'true':'false')+'" data-note-id="'+r.id+'">'+getNote(r.id)+'</td></tr>').join('')+
     '</tbody></table>';
+  document.querySelectorAll('#qtr-'+qtr+'-narr-table .notes-cell').forEach(cell=>{cell.addEventListener('blur',()=>{if(notesUnlocked)saveNote(cell.dataset.noteId,cell.textContent.trim());});});
 
   // Non-US narrative sub-tab
   const nonUsForQtr=allForQtr.filter(r=>r.ctry&&r.ctry!=='United States');
@@ -446,8 +485,9 @@ function renderQuarterTab(qtr){
   ]);
   document.getElementById('qtr-'+qtr+'-intl-narr-info').textContent='Non-US Top 15 of '+nonUsForQtr.length+' international opportunities in '+qtr;
   document.getElementById('qtr-'+qtr+'-intl-narr-table').innerHTML='<table><thead><tr><th>#</th><th>Account Name</th><th>Country</th><th>Use Case Summary</th><th>Forecast</th><th>Stage</th><th>First Line Manager</th><th>Amount</th><th>Notes/Remarks</th></tr></thead><tbody>'+
-    top15.map((r,i)=>'<tr><td>'+(i+1)+'</td><td class="acct-name">'+r.acct+'<br><span style="font-size:10px;color:var(--text3)">'+r.own+'</span></td><td>'+r.ctry+'</td><td class="use-case">'+(r.uc||'<span style="color:var(--text3)">—</span>')+'</td><td>'+fcBadge(r.fc)+'</td><td><span class="badge badge-stage">'+stgShort(r.stg)+'</span></td><td>'+r.mgr+'</td><td class="amount">'+fmtFull(r.amt)+'</td><td></td></tr>').join('')+
+    top15.map((r,i)=>'<tr><td>'+(i+1)+'</td><td class="acct-name">'+r.acct+'<br><span style="font-size:10px;color:var(--text3)">'+r.own+'</span></td><td>'+r.ctry+'</td><td class="use-case">'+(r.uc||'<span style="color:var(--text3)">—</span>')+'</td><td>'+fcBadge(r.fc)+'</td><td><span class="badge badge-stage">'+stgShort(r.stg)+'</span></td><td>'+r.mgr+'</td><td class="amount">'+fmtFull(r.amt)+'</td><td class="notes-cell'+(notesUnlocked?' editable':'')+'" contenteditable="'+(notesUnlocked?'true':'false')+'" data-note-id="'+r.id+'">'+getNote(r.id)+'</td></tr>').join('')+
     '</tbody></table>';
+  document.querySelectorAll('#qtr-'+qtr+'-intl-narr-table .notes-cell').forEach(cell=>{cell.addEventListener('blur',()=>{if(notesUnlocked)saveNote(cell.dataset.noteId,cell.textContent.trim());});});
 }
 
 function render(){
