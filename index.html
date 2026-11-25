@@ -140,7 +140,8 @@ td.qtr-cell{text-align:center;font-weight:600}
 <div class="tabs" id="main-tabs">
   <button class="tab active" data-tab="summary">Pipeline Summary</button>
   <button class="btn-reset" onclick="resetAllChartFilters()" style="margin-left:auto;align-self:center">Reset All</button>
-  <button class="edit-lock-btn" id="edit-lock-btn" onclick="toggleEditLock()" style="align-self:center;margin-right:12px">Unlock Notes</button>
+  <button class="edit-lock-btn" id="edit-lock-btn" onclick="toggleEditLock()" style="align-self:center">Unlock Notes</button>
+  <button class="edit-lock-btn" id="sync-btn" onclick="syncNotesToSheet()" style="align-self:center;margin-right:12px;display:none;border-color:var(--accent);color:var(--accent)">Sync to Sheet</button>
 </div>
 
 <!-- Tab: Summary -->
@@ -175,7 +176,7 @@ let filtered = [...DATA];
 let activeTab = 'summary';
 
 // Helpers
-const APPS_SCRIPT_URL='https://script.google.com/a/macros/salesforce.com/s/AKfycbxPEwFsCm6YRqLtg8-ADsm1p_jK8R57WWdXnVQohycazwYCV2Y9pV2OJ7A1W7-X2Xa77w/exec'; // Paste your deployed Apps Script web app URL here
+const APPS_SCRIPT_URL='https://script.google.com/a/macros/salesforce.com/s/AKfycbxPEwFsCm6YRqLtg8-ADsm1p_jK8R57WWdXnVQohycazwYCV2Y9pV2OJ7A1W7-X2Xa77w/exec';
 let notesCache={};
 let notesUnlocked=false;
 let editToken='';
@@ -183,19 +184,27 @@ function getNote(id){return notesCache[id]||'';}
 function saveNote(id,text){
   notesCache[id]=text;
   try{localStorage.setItem('dashNotes',JSON.stringify(notesCache));}catch(e){}
-  if(!APPS_SCRIPT_URL||!editToken)return;
-  fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({id:id,note:text,token:editToken}),redirect:'follow'}).catch(()=>{});
 }
 function loadNotesFromSheet(){
-  if(!APPS_SCRIPT_URL){try{notesCache=JSON.parse(localStorage.getItem('dashNotes')||'{}');}catch(e){}return Promise.resolve();}
-  return fetch(APPS_SCRIPT_URL,{redirect:'follow'}).then(r=>r.json()).then(data=>{notesCache=data;localStorage.setItem('dashNotes',JSON.stringify(data));}).catch(()=>{try{notesCache=JSON.parse(localStorage.getItem('dashNotes')||'{}');}catch(e){}});
+  try{notesCache=JSON.parse(localStorage.getItem('dashNotes')||'{}');}catch(e){}
+  return Promise.resolve();
+}
+function syncNotesToSheet(){
+  if(!APPS_SCRIPT_URL||!editToken){alert('Unlock notes first.');return;}
+  const notes=Object.entries(notesCache).filter(([k,v])=>v);
+  if(!notes.length){alert('No notes to sync.');return;}
+  const form=document.createElement('form');
+  form.method='POST';form.action=APPS_SCRIPT_URL;form.target='_blank';
+  const fToken=document.createElement('input');fToken.type='hidden';fToken.name='token';fToken.value=editToken;form.appendChild(fToken);
+  const fData=document.createElement('input');fData.type='hidden';fData.name='notes';fData.value=JSON.stringify(notesCache);form.appendChild(fData);
+  document.body.appendChild(form);form.submit();document.body.removeChild(form);
 }
 function toggleEditLock(){
   const btn=document.getElementById('edit-lock-btn');
-  if(notesUnlocked){notesUnlocked=false;editToken='';btn.textContent='Unlock Notes';btn.classList.remove('unlocked');applyNotesLock();return;}
+  if(notesUnlocked){notesUnlocked=false;editToken='';btn.textContent='Unlock Notes';btn.classList.remove('unlocked');document.getElementById('sync-btn').style.display='none';applyNotesLock();return;}
   const pw=prompt('Enter passphrase to unlock notes editing:');
   if(!pw)return;
-  editToken=pw;notesUnlocked=true;btn.textContent='Lock Notes';btn.classList.add('unlocked');applyNotesLock();
+  editToken=pw;notesUnlocked=true;btn.textContent='Lock Notes';btn.classList.add('unlocked');document.getElementById('sync-btn').style.display='';applyNotesLock();
 }
 function applyNotesLock(){
   document.querySelectorAll('.notes-cell').forEach(cell=>{
